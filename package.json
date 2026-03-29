@@ -1,0 +1,16 @@
+{
+  "name": "cinevault",
+  "version": "1.0.0",
+  "description": "CineVault - Movie & TV streaming discovery app",
+  "main": "index.js",
+  "scripts": {
+    "dev": "npx serve public",
+    "start": "npx serve public"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
