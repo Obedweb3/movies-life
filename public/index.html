@@ -509,6 +509,74 @@
       #search-page { padding: 80px 16px 60px; }
     }
   </style>
+  <!-- ═══ AD BLOCKER ═══ -->
+  <script>
+    // 1. Block all new-tab / popup windows opened by iframes
+    const _open = window.open.bind(window);
+    window.open = function(...args) {
+      // Allow user-initiated opens (e.g. download links) but block auto-popups
+      if (!window._userClick) return null;
+      return _open(...args);
+    };
+    document.addEventListener('mousedown', () => { window._userClick = true; }, true);
+    document.addEventListener('keydown',   () => { window._userClick = true; }, true);
+    setTimeout(() => { window._userClick = false; }, 500);
+    document.addEventListener('mouseup', () => setTimeout(() => { window._userClick = false; }, 500), true);
+
+    // 2. Intercept any navigation away from the page
+    window.addEventListener('beforeunload', e => {
+      if (document.getElementById('player-section') && !document.getElementById('player-section').classList.contains('hidden')) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+
+    // 3. Block popunder / invisible iframes injected by ad scripts
+    const _origAppendChild = Element.prototype.appendChild;
+    const _origInsertBefore = Element.prototype.insertBefore;
+    const _origCreateElement = document.createElement.bind(document);
+
+    function isAdFrame(el) {
+      if (!el || el.tagName !== 'IFRAME') return false;
+      const src = el.src || el.getAttribute('src') || '';
+      // Block zero-size or known ad iframes
+      if (el.style && (el.style.width === '0px' || el.style.height === '0px')) return true;
+      if (el.width === '0' || el.height === '0') return true;
+      return false;
+    }
+
+    Element.prototype.appendChild = function(child) {
+      if (isAdFrame(child)) { console.log('[AdBlock] Blocked injected iframe:', child.src); return child; }
+      return _origAppendChild.call(this, child);
+    };
+    Element.prototype.insertBefore = function(child, ref) {
+      if (isAdFrame(child)) { console.log('[AdBlock] Blocked injected iframe (insertBefore):', child.src); return child; }
+      return _origInsertBefore.call(this, child, ref);
+    };
+
+    // 4. Remove any overlay divs / full-screen ad elements injected after load
+    const _adObserver = new MutationObserver(mutations => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          const style = window.getComputedStyle ? window.getComputedStyle(node) : {};
+          const isFullOverlay =
+            node.style &&
+            (node.style.position === 'fixed' || node.style.position === 'absolute') &&
+            (parseInt(node.style.zIndex) > 9000) &&
+            node.id !== 'player-frame-wrap' &&
+            !node.closest('#player-frame-wrap');
+          if (isFullOverlay) {
+            console.log('[AdBlock] Removed overlay element:', node.tagName, node.id, node.className);
+            node.remove();
+          }
+        }
+      }
+    });
+    document.addEventListener('DOMContentLoaded', () => {
+      _adObserver.observe(document.body, { childList: true, subtree: true });
+    });
+  </script>
 </head>
 <body>
 
@@ -600,7 +668,7 @@
         <div id="player-servers"></div>
       </div>
       <div id="player-frame-wrap">
-        <iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen"></iframe>
+        <iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock"></iframe>
       </div>
       <p id="player-note"></p>
     </div>
@@ -1219,7 +1287,7 @@ function renderPlayerFrame(players) {
     };
   });
   const wrap = document.getElementById('player-frame-wrap');
-  wrap.innerHTML = '<iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen" style="width:100%;height:100%;border:none;display:block;"></iframe>';
+  wrap.innerHTML = '<iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock" style="width:100%;height:100%;border:none;display:block;"></iframe>';
   setIframe(players[activeServerIndex]);
 }
 
