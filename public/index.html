@@ -511,71 +511,113 @@
   </style>
   <!-- ═══ AD BLOCKER ═══ -->
   <script>
-    // 1. Block all new-tab / popup windows opened by iframes
-    const _open = window.open.bind(window);
-    window.open = function(...args) {
-      // Allow user-initiated opens (e.g. download links) but block auto-popups
-      if (!window._userClick) return null;
-      return _open(...args);
-    };
-    document.addEventListener('mousedown', () => { window._userClick = true; }, true);
-    document.addEventListener('keydown',   () => { window._userClick = true; }, true);
-    setTimeout(() => { window._userClick = false; }, 500);
-    document.addEventListener('mouseup', () => setTimeout(() => { window._userClick = false; }, 500), true);
+    (function() {
+      // ── 1. POPUP / NEW TAB BLOCKER ──────────────────────────────────────
+      // Track whether the user genuinely clicked something on THIS page
+      let userClickedMain = false;
+      document.addEventListener('mousedown', () => { userClickedMain = true; }, true);
+      document.addEventListener('keydown',   () => { userClickedMain = true; }, true);
+      // Reset after 600ms — enough time for a legitimate click to fire window.open
+      document.addEventListener('mouseup', () => {
+        setTimeout(() => { userClickedMain = false; }, 600);
+      }, true);
 
-    // 2. Intercept any navigation away from the page
-    window.addEventListener('beforeunload', e => {
-      if (document.getElementById('player-section') && !document.getElementById('player-section').classList.contains('hidden')) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    });
-
-    // 3. Block popunder / invisible iframes injected by ad scripts
-    const _origAppendChild = Element.prototype.appendChild;
-    const _origInsertBefore = Element.prototype.insertBefore;
-    const _origCreateElement = document.createElement.bind(document);
-
-    function isAdFrame(el) {
-      if (!el || el.tagName !== 'IFRAME') return false;
-      const src = el.src || el.getAttribute('src') || '';
-      // Block zero-size or known ad iframes
-      if (el.style && (el.style.width === '0px' || el.style.height === '0px')) return true;
-      if (el.width === '0' || el.height === '0') return true;
-      return false;
-    }
-
-    Element.prototype.appendChild = function(child) {
-      if (isAdFrame(child)) { console.log('[AdBlock] Blocked injected iframe:', child.src); return child; }
-      return _origAppendChild.call(this, child);
-    };
-    Element.prototype.insertBefore = function(child, ref) {
-      if (isAdFrame(child)) { console.log('[AdBlock] Blocked injected iframe (insertBefore):', child.src); return child; }
-      return _origInsertBefore.call(this, child, ref);
-    };
-
-    // 4. Remove any overlay divs / full-screen ad elements injected after load
-    const _adObserver = new MutationObserver(mutations => {
-      for (const m of mutations) {
-        for (const node of m.addedNodes) {
-          if (node.nodeType !== 1) continue;
-          const style = window.getComputedStyle ? window.getComputedStyle(node) : {};
-          const isFullOverlay =
-            node.style &&
-            (node.style.position === 'fixed' || node.style.position === 'absolute') &&
-            (parseInt(node.style.zIndex) > 9000) &&
-            node.id !== 'player-frame-wrap' &&
-            !node.closest('#player-frame-wrap');
-          if (isFullOverlay) {
-            console.log('[AdBlock] Removed overlay element:', node.tagName, node.id, node.className);
-            node.remove();
-          }
+      const _nativeOpen = window.open.bind(window);
+      window.open = function(url, target, features) {
+        // Block if not triggered by a real user action on the main page
+        if (!userClickedMain) {
+          console.log('[AdBlock] Blocked popup:', url);
+          return { closed: true, close() {}, focus() {}, location: {} };
         }
+        return _nativeOpen(url, target, features);
+      };
+
+      // ── 2. BLOCK INVISIBLE / ZERO-SIZE IFRAMES (popunders) ──────────────
+      function isAdIframe(el) {
+        if (!el || el.tagName !== 'IFRAME') return false;
+        if (el.id === 'player-iframe') return false; // never block our player
+        const w = el.getAttribute('width')  || el.style.width  || '';
+        const h = el.getAttribute('height') || el.style.height || '';
+        if (w === '0' || h === '0' || w === '0px' || h === '0px') return true;
+        if (el.style.display === 'none' && el.style.position === 'fixed') return true;
+        return false;
       }
-    });
-    document.addEventListener('DOMContentLoaded', () => {
-      _adObserver.observe(document.body, { childList: true, subtree: true });
-    });
+
+      const _appendChild   = Element.prototype.appendChild;
+      const _insertBefore  = Element.prototype.insertBefore;
+      const _prepend       = Element.prototype.prepend;
+
+      Element.prototype.appendChild = function(node) {
+        if (isAdIframe(node)) { console.log('[AdBlock] Blocked iframe append:', node.src); return node; }
+        return _appendChild.call(this, node);
+      };
+      Element.prototype.insertBefore = function(node, ref) {
+        if (isAdIframe(node)) { console.log('[AdBlock] Blocked iframe insert:', node.src); return node; }
+        return _insertBefore.call(this, node, ref);
+      };
+      Element.prototype.prepend = function(...nodes) {
+        for (const node of nodes) {
+          if (isAdIframe(node)) { console.log('[AdBlock] Blocked iframe prepend:', node.src); return; }
+        }
+        return _prepend.call(this, ...nodes);
+      };
+
+      // ── 3. REMOVE FULLSCREEN AD OVERLAYS injected into the DOM ──────────
+      // Runs after DOM is ready, watches for injected fixed/absolute elements
+      // with suspiciously high z-index that aren't part of our app
+      const knownAppIds = new Set([
+        'navbar','hero','player-section','player-frame-wrap','player-iframe',
+        'detail-page','home-page','search-page','tv-seasons-section',
+        'cast-section','similar-section','ep-info-bar','download-panel'
+      ]);
+
+      function isAdOverlay(el) {
+        if (!el || el.nodeType !== 1) return false;
+        if (knownAppIds.has(el.id)) return false;
+        const s = el.style;
+        const pos = s.position;
+        const zi  = parseInt(s.zIndex) || 0;
+        if ((pos === 'fixed' || pos === 'absolute') && zi > 8000) return true;
+        // Also catch full-viewport overlays even without crazy z-index
+        if (pos === 'fixed' && s.top === '0px' && s.left === '0px' &&
+            (s.width === '100%' || s.width === '100vw') &&
+            (s.height === '100%' || s.height === '100vh') &&
+            !knownAppIds.has(el.id)) return true;
+        return false;
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const observer = new MutationObserver(mutations => {
+          for (const m of mutations) {
+            for (const node of m.addedNodes) {
+              if (isAdOverlay(node)) {
+                console.log('[AdBlock] Removed overlay:', node.tagName, node.id || node.className);
+                node.remove();
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      });
+
+      // ── 4. PREVENT NAVIGATION HIJACK (iframe trying to redirect top page) ─
+      window.addEventListener('message', e => {
+        // Ignore messages from our own origin
+        if (e.origin === location.origin) return;
+        // If a cross-origin frame tries to navigate top, ignore
+      });
+
+      // Block attempts from iframes to change top-level location
+      Object.defineProperty(window, 'location', {
+        get() { return location; },
+        set(v) {
+          if (userClickedMain) { location.href = v; }
+          else { console.log('[AdBlock] Blocked location hijack to:', v); }
+        },
+        configurable: true
+      });
+
+    })();
   </script>
 </head>
 <body>
@@ -668,7 +710,7 @@
         <div id="player-servers"></div>
       </div>
       <div id="player-frame-wrap">
-        <iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock"></iframe>
+        <iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen"></iframe>
       </div>
       <p id="player-note"></p>
     </div>
@@ -1287,7 +1329,7 @@ function renderPlayerFrame(players) {
     };
   });
   const wrap = document.getElementById('player-frame-wrap');
-  wrap.innerHTML = '<iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock" style="width:100%;height:100%;border:none;display:block;"></iframe>';
+  wrap.innerHTML = '<iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen" style="width:100%;height:100%;border:none;display:block;"></iframe>';
   setIframe(players[activeServerIndex]);
 }
 
