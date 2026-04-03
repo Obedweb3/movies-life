@@ -507,53 +507,6 @@
 
     .empty-msg { text-align: center; color: var(--fg3); padding: 60px 0; font-size: 14px; }
 
-
-    /* SMART SEARCH DROPDOWN */
-    .search-input-wrap { position: relative; }
-    #search-suggestions {
-      position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 500;
-      background: var(--bg2); border: 1px solid rgba(124,58,237,0.3);
-      border-radius: 12px; overflow: hidden;
-      box-shadow: 0 12px 40px rgba(0,0,0,0.7);
-      display: none;
-    }
-    #search-suggestions.open { display: block; animation: fadeIn 0.15s ease; }
-    .sugg-item {
-      display: flex; align-items: center; gap: 12px;
-      padding: 10px 16px; cursor: pointer; transition: background 0.12s;
-      border-bottom: 1px solid rgba(120,100,255,0.07);
-    }
-    .sugg-item:last-child { border-bottom: none; }
-    .sugg-item:hover, .sugg-item.highlighted { background: rgba(124,58,237,0.12); }
-    .sugg-thumb {
-      width: 36px; height: 52px; border-radius: 5px; object-fit: cover;
-      background: var(--bg3); flex-shrink: 0;
-    }
-    .sugg-thumb-placeholder {
-      width: 36px; height: 52px; border-radius: 5px; background: var(--bg3);
-      display: flex; align-items: center; justify-content: center;
-      color: var(--fg3); font-size: 16px; flex-shrink: 0;
-    }
-    .sugg-info { flex: 1; min-width: 0; }
-    .sugg-title { font-family: var(--font-head); font-size: 13px; font-weight: 700; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .sugg-meta { font-size: 11px; color: var(--fg3); margin-top: 2px; }
-    .sugg-type { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 3px; background: rgba(124,58,237,0.2); color: var(--neon); letter-spacing: 0.5px; }
-    .sugg-rating { color: var(--gold); font-size: 11px; }
-    .search-trending-label {
-      padding: 8px 16px 4px; font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
-      text-transform: uppercase; color: var(--fg3); border-bottom: 1px solid var(--border);
-    }
-    /* Nav search also gets suggestion dropdown */
-    #nav-search-wrap { position: relative; }
-    #nav-suggestions {
-      position: absolute; top: calc(100% + 6px); left: 0; min-width: 340px; z-index: 600;
-      background: var(--bg2); border: 1px solid rgba(124,58,237,0.3);
-      border-radius: 12px; overflow: hidden;
-      box-shadow: 0 12px 40px rgba(0,0,0,0.7);
-      display: none;
-    }
-    #nav-suggestions.open { display: block; animation: fadeIn 0.15s ease; }
-
     @media (max-width: 640px) {
       #hero-content { padding: 0 20px; }
       #hero-progress { left: 20px; }
@@ -565,119 +518,129 @@
       #search-page { padding: 80px 16px 60px; }
     }
   </style>
-  <!-- ═══ AD BLOCKER v2 ═══ -->
+  <!-- ═══ AD BLOCKER ═══ -->
   <script>
-    (function(){
-      'use strict';
-      var userClickedMain=false,_t=null;
-      function setUC(){userClickedMain=true;clearTimeout(_t);_t=setTimeout(function(){userClickedMain=false;},900);}
-      document.addEventListener('mousedown',setUC,true);
-      document.addEventListener('keydown',setUC,true);
-      document.addEventListener('pointerdown',setUC,true);
+    (function() {
 
-      /* block window.open */
-      var _open=window.open.bind(window);
-      window.open=function(u,t,f){
-        if(!userClickedMain){console.log('[AB] Blocked open:',u);return{closed:true,close:function(){},focus:function(){},location:{href:''}};}
-        return _open(u,t,f);
+      // ── 1. TRACK USER CLICKS ON THE MAIN PAGE ───────────────────────────
+      // Only clicks on THIS document count as "real" — iframe clicks do NOT set this
+      let userClickedMain = false;
+      document.addEventListener('mousedown', () => { userClickedMain = true; }, true);
+      document.addEventListener('keydown',   () => { userClickedMain = true; }, true);
+      document.addEventListener('mouseup',   () => { setTimeout(() => { userClickedMain = false; }, 800); }, true);
+
+      // ── 2. BLOCK window.open POPUPS ─────────────────────────────────────
+      const _nativeOpen = window.open.bind(window);
+      window.open = function(url, target, features) {
+        if (!userClickedMain) {
+          console.log('[AdBlock] Blocked window.open popup:', url);
+          return { closed: true, close(){}, focus(){}, location:{} };
+        }
+        return _nativeOpen(url, target, features);
       };
 
-      /* ad domain list */
-      var AD=['doubleclick','googlesyndication','adservice','adnxs','openx',
-        'pubmatic','rubiconproject','casalemedia','criteo','taboola','outbrain',
-        'revcontent','mgid','popads','propellerads','popcash','clickadu',
-        'trafficjunky','exoclick','trafficfactory','plugrush','juicyads',
-        'hilltopads','adcash','bidswitch','opera.com/download','getopera',
-        'amazon-adsystem','googletag','scorecardresearch'];
-      function isAd(u){if(!u||u[0]==='#')return false;var l=u.toLowerCase();return AD.some(function(d){return l.indexOf(d)>=0;});}
-
-      /* block _blank link navigation */
-      window.addEventListener('click',function(e){
-        var a=e.target&&e.target.closest('a');
-        if(a){
-          var tgt=(a.getAttribute('target')||'').toLowerCase();
-          var href=a.getAttribute('href')||'';
-          if((tgt==='_blank'||tgt==='_new'||tgt==='_top')&&!userClickedMain){e.preventDefault();e.stopImmediatePropagation();return false;}
-          if(isAd(href)){e.preventDefault();e.stopImmediatePropagation();return false;}
+      // ── 3. BLOCK CLICKS THAT OPEN NEW TABS (target=_blank via links) ────
+      // This is the main fix for what you saw — embed players inject <a target="_blank">
+      // or use click events that open opera.com / ad sites in new tabs.
+      // We intercept ALL click events at the window level (capture phase).
+      window.addEventListener('click', function(e) {
+        // If click came from INSIDE the player iframe, it won't reach here —
+        // but the iframe can still dispatch synthetic events or use window.open.
+        // This catches any <a target="_blank"> that escapes into the main document.
+        const anchor = e.target && e.target.closest('a');
+        if (anchor) {
+          const target = anchor.getAttribute('target');
+          const href   = anchor.getAttribute('href') || '';
+          // Block new-tab links that are NOT user-initiated on the main document
+          if ((target === '_blank' || target === '_new') && !userClickedMain) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            console.log('[AdBlock] Blocked _blank link:', href);
+            return false;
+          }
         }
-      },true);
+      }, true);
 
-      /* block programmatic .click() */
-      var _click=HTMLElement.prototype.click;
-      HTMLElement.prototype.click=function(){
-        if(this.tagName==='A'){
-          var tgt=(this.getAttribute('target')||'').toLowerCase();
-          var href=this.getAttribute('href')||'';
-          if((tgt==='_blank'||tgt==='_new')&&!userClickedMain)return;
-          if(isAd(href))return;
+      // ── 4. INTERCEPT FAKE CLICK EVENTS DISPATCHED BY AD SCRIPTS ─────────
+      // Some ad scripts create an <a> element, set href to ad URL, and call .click()
+      const _nativeClick = HTMLElement.prototype.click;
+      HTMLElement.prototype.click = function() {
+        if (this.tagName === 'A') {
+          const href   = this.getAttribute('href') || '';
+          const target = this.getAttribute('target') || '';
+          if ((target === '_blank' || target === '_new') && !userClickedMain) {
+            console.log('[AdBlock] Blocked programmatic .click() on link:', href);
+            return;
+          }
         }
-        return _click.call(this);
+        return _nativeClick.call(this);
       };
 
-      /* block hidden/zero iframes */
-      function isAdIframe(el){
-        if(!el||el.tagName!=='IFRAME')return false;
-        if(el.id==='player-iframe')return false;
-        var w=parseInt(el.getAttribute('width')||el.style.width||'1');
-        var h=parseInt(el.getAttribute('height')||el.style.height||'1');
-        if(w===0||h===0)return true;
-        if(isAd(el.src||''))return true;
-        if(el.style.display==='none'&&el.style.position==='fixed')return true;
+      // ── 5. BLOCK INVISIBLE / ZERO-SIZE IFRAMES (popunders) ──────────────
+      function isAdIframe(el) {
+        if (!el || el.tagName !== 'IFRAME') return false;
+        if (el.id === 'player-iframe') return false;
+        const w = el.getAttribute('width')  || el.style.width  || '';
+        const h = el.getAttribute('height') || el.style.height || '';
+        if (w === '0' || h === '0' || w === '0px' || h === '0px') return true;
+        if (el.style.display === 'none' && el.style.position === 'fixed') return true;
         return false;
       }
-      var _ac=Element.prototype.appendChild,_ib=Element.prototype.insertBefore,_pr=Element.prototype.prepend;
-      Element.prototype.appendChild=function(n){if(isAdIframe(n))return n;return _ac.call(this,n);};
-      Element.prototype.insertBefore=function(n,r){if(isAdIframe(n))return n;return _ib.call(this,n,r);};
-      Element.prototype.prepend=function(){for(var i=0;i<arguments.length;i++){if(isAdIframe(arguments[i]))return;} return _pr.apply(this,arguments);};
-
-      /* block ad scripts */
-      var _acNode=Node.prototype.appendChild;
-      Node.prototype.appendChild=function(n){
-        if(n&&n.tagName==='SCRIPT'&&isAd(n.src||''))return n;
-        return _acNode.call(this,n);
+      const _appendChild  = Element.prototype.appendChild;
+      const _insertBefore = Element.prototype.insertBefore;
+      const _prepend      = Element.prototype.prepend;
+      Element.prototype.appendChild = function(node) {
+        if (isAdIframe(node)) { console.log('[AdBlock] Blocked iframe append'); return node; }
+        return _appendChild.call(this, node);
+      };
+      Element.prototype.insertBefore = function(node, ref) {
+        if (isAdIframe(node)) { console.log('[AdBlock] Blocked iframe insert'); return node; }
+        return _insertBefore.call(this, node, ref);
+      };
+      Element.prototype.prepend = function(...nodes) {
+        for (const n of nodes) {
+          if (isAdIframe(n)) { console.log('[AdBlock] Blocked iframe prepend'); return; }
+        }
+        return _prepend.call(this, ...nodes);
       };
 
-      /* overlay removal */
-      var KNOWN=new Set(['navbar','hero','hero-bg','hero-content','rows-wrap','home-page',
-        'search-page','detail-page','player-section','player-frame-wrap','player-iframe',
-        'player-shield','tv-seasons-section','cast-section','similar-section',
-        'download-panel','nav-search-wrap','nav-search-form']);
-      function isOverlay(el){
-        if(!el||el.nodeType!==1)return false;
-        if(KNOWN.has(el.id))return false;
-        if(el.closest&&el.closest('#navbar,#home-page,#search-page,#detail-page,footer'))return false;
-        var s=el.style;
-        var z=parseInt(s.zIndex||0);
-        if((s.position==='fixed'||s.position==='absolute')&&z>8000)return true;
-        if(s.position==='fixed'&&(s.top==='0px'||s.top==='0')&&
-           (s.width==='100%'||s.width==='100vw')&&
-           (s.height==='100%'||s.height==='100vh'))return true;
+      // ── 6. REMOVE FULLSCREEN AD OVERLAYS ────────────────────────────────
+      const knownIds = new Set([
+        'navbar','hero','player-section','player-frame-wrap','player-iframe',
+        'detail-page','home-page','search-page','tv-seasons-section',
+        'cast-section','similar-section','ep-info-bar','download-panel'
+      ]);
+      function isAdOverlay(el) {
+        if (!el || el.nodeType !== 1) return false;
+        if (knownIds.has(el.id)) return false;
+        const s = el.style;
+        if ((s.position === 'fixed' || s.position === 'absolute') && parseInt(s.zIndex) > 8000) return true;
+        if (s.position === 'fixed' && s.top === '0px' && s.left === '0px' &&
+           (s.width === '100%' || s.width === '100vw') &&
+           (s.height === '100%' || s.height === '100vh')) return true;
         return false;
       }
-      document.addEventListener('DOMContentLoaded',function(){
-        new MutationObserver(function(muts){
-          muts.forEach(function(m){
-            m.addedNodes.forEach(function(n){
-              if(n.nodeType===1&&isOverlay(n)){console.log('[AB] Removed overlay');n.remove();}
-            });
-          });
-        }).observe(document.body,{childList:true,subtree:true});
+      document.addEventListener('DOMContentLoaded', () => {
+        new MutationObserver(mutations => {
+          for (const m of mutations)
+            for (const node of m.addedNodes)
+              if (isAdOverlay(node)) { console.log('[AdBlock] Removed overlay:', node.tagName); node.remove(); }
+        }).observe(document.body, { childList: true, subtree: true });
       });
 
-      /* block location hijack */
-      try{
-        var _loc=window.location;
-        Object.defineProperty(window,'location',{
-          get:function(){return _loc;},
-          set:function(v){if(userClickedMain){_loc.href=v;}else{console.log('[AB] Blocked location hijack:',v);}},
-          configurable:true
+      // ── 7. BLOCK TOP-LEVEL LOCATION HIJACK FROM IFRAMES ─────────────────
+      // Iframes can try to navigate the parent window via window.top.location
+      try {
+        let _loc = window.location;
+        Object.defineProperty(window, 'location', {
+          get() { return _loc; },
+          set(v) {
+            if (userClickedMain) { _loc.href = v; }
+            else { console.log('[AdBlock] Blocked location hijack:', v); }
+          },
+          configurable: true
         });
-      }catch(e){}
-
-      /* block history abuse */
-      var _ps=history.pushState.bind(history),_rs=history.replaceState.bind(history);
-      history.pushState=function(s,t,u){if(u&&isAd(String(u)))return;return _ps(s,t,u);};
-      history.replaceState=function(s,t,u){if(u&&isAd(String(u)))return;return _rs(s,t,u);};
+      } catch(e) { /* read-only in some browsers, skip */ }
 
     })();
   </script>
@@ -687,16 +650,17 @@
 <!-- NAVBAR -->
 <nav id="navbar">
   <button class="nav-logo" id="nav-logo">
-    <div class="nav-logo-mark" style="background:transparent;box-shadow:none;"></div>
+    <div class="nav-logo-mark">🎯</div>
+    <div class="nav-logo-text">
+      <span class="nav-logo-main">HUNTER CINE</span>
+      <span class="nav-logo-sub">Powered by Obed Tech</span>
+    </div>
   </button>
   <div class="nav-right">
-    <div id="nav-search-wrap">
     <div id="nav-search-form" class="hidden">
       <input id="nav-search-input" type="text" placeholder="Search movies &amp; shows…" autocomplete="off" />
       <button class="nav-btn-go" id="nav-search-go">Search</button>
       <button class="nav-btn-close" id="nav-search-close">✕</button>
-    </div>
-    <div id="nav-suggestions"></div>
     </div>
     <button id="nav-search-btn">🔍 &nbsp;Search</button>
   </div>
@@ -732,7 +696,6 @@
   <div class="search-input-wrap">
     <span class="search-icon">🔍</span>
     <input id="search-input" type="text" placeholder="Search movies, TV shows…" autocomplete="off" />
-    <div id="search-suggestions"></div>
   </div>
   <div id="genre-pills"></div>
   <h2 id="search-heading">Trending</h2>
@@ -822,10 +785,6 @@
 <script>
 /* ═══════════════════════════════════════════════
    API
-<script>
-
-/* ═══════════════════════════════════════════════
-   API
 ═══════════════════════════════════════════════ */
 const API_PROXY  = '/api';
 const API_DIRECT = 'https://movie-api.obedtech.top/api';
@@ -838,7 +797,7 @@ async function apiFetch(path) {
   for (const base of bases) {
     try {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 16000);
+      const t = setTimeout(() => ctrl.abort(), 14000);
       const res = await fetch(base + path, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
       clearTimeout(t);
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -874,48 +833,6 @@ const api = {
 };
 
 /* ═══════════════════════════════════════════════
-   SERVER NAME MAP  (provider → display name)
-═══════════════════════════════════════════════ */
-const SERVER_NAMES = {
-  'vidsrc.to'   : 'StreamHub HD',
-  'vidsrc.me'   : 'StreamHub HD',
-  'vidsrc'      : 'StreamHub HD',
-  'vidsrc.xyz'  : 'StreamHub HD',
-  'vidsrc.net'  : 'StreamHub HD',
-  '2embed'      : 'CineStream',
-  '2embed.cc'   : 'CineStream',
-  'superembed'  : 'NovaCine',
-  'super-embed' : 'NovaCine',
-  'multiembed'  : 'VaultPlay',
-  'multi-embed' : 'VaultPlay',
-  'embedsu'     : 'PrimeView',
-  'embed.su'    : 'PrimeView',
-  'autoembed'   : 'FluxStream',
-  'auto-embed'  : 'FluxStream',
-  'smashystream': 'TurboPlay',
-  'smashy'      : 'TurboPlay',
-  'moviesapi'   : 'RapidCine',
-  'moviesapi.club': 'RapidCine',
-  'frembed'     : 'FreeView',
-  'player.php'  : 'QuickStream',
-  'embedder'    : 'EmbedPro',
-  'streamtape'  : 'TapeStream',
-  'doodstream'  : 'DoodPlay',
-  'filemoon'    : 'MoonStream',
-  'upstream'    : 'UpStream',
-};
-
-function friendlyProvider(raw) {
-  if (!raw) return 'Server';
-  const key = raw.toLowerCase().replace(/https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-  for (const [k, v] of Object.entries(SERVER_NAMES)) {
-    if (key.includes(k) || raw.toLowerCase().includes(k)) return v;
-  }
-  // Title-case fallback
-  return raw.replace(/[-_.]/g,' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
-/* ═══════════════════════════════════════════════
    STATE
 ═══════════════════════════════════════════════ */
 let heroItems=[], heroIndex=0, heroTimer=null;
@@ -924,8 +841,6 @@ let playerData=null, activeServerIndex=0;
 let selectedSeason=1, selectedEpisode=null;
 let currentEpisodes=[], currentTvId=null;
 let searchDebounce=null, selectedGenre=null, genres=[];
-let suggDebounce=null, suggHighlight=-1;
-let trendingCache=[];
 
 /* ═══════════════════════════════════════════════
    ROUTER
@@ -963,116 +878,6 @@ function makeCard(item) {
 function attachCardClicks(container) {
   container.querySelectorAll('.card').forEach(card => {
     card.addEventListener('click', () => openDetail({ id: card.dataset.id, type: card.dataset.type }));
-  });
-}
-
-/* ═══════════════════════════════════════════════
-   SMART SEARCH SUGGESTIONS
-═══════════════════════════════════════════════ */
-function makeSuggItem(item) {
-  const title = item.title || item.name || '';
-  const type  = item.type || 'movie';
-  const year  = item.year || '';
-  const rating = item.rating ? '★ ' + (+item.rating).toFixed(1) : '';
-  const thumb  = item.poster_url || '';
-  return `<div class="sugg-item" data-id="${item.id}" data-type="${type}">
-    ${thumb
-      ? `<img class="sugg-thumb" src="${esc(thumb)}" alt="" loading="lazy" onerror="this.className='sugg-thumb-placeholder';this.textContent='🎬'" />`
-      : `<div class="sugg-thumb-placeholder">🎬</div>`}
-    <div class="sugg-info">
-      <div class="sugg-title">${esc(title)}</div>
-      <div class="sugg-meta">${year ? esc(year) + ' · ' : ''}<span class="sugg-type">${esc(type.toUpperCase())}</span>${rating ? ' <span class="sugg-rating">' + esc(rating) + '</span>' : ''}</div>
-    </div>
-  </div>`;
-}
-
-function openSuggestions(container, items, label) {
-  if (!items || !items.length) { closeSuggestions(container); return; }
-  const show = items.slice(0, 7);
-  container.innerHTML = (label ? `<div class="search-trending-label">${label}</div>` : '') + show.map(makeSuggItem).join('');
-  container.querySelectorAll('.sugg-item').forEach(el => {
-    el.addEventListener('mousedown', e => {
-      e.preventDefault();
-      closeSuggestions(container);
-      openDetail({ id: el.dataset.id, type: el.dataset.type });
-    });
-  });
-  container.classList.add('open');
-  suggHighlight = -1;
-}
-
-function closeSuggestions(container) {
-  if (container) { container.classList.remove('open'); container.innerHTML = ''; }
-  suggHighlight = -1;
-}
-
-function moveSuggHighlight(container, dir) {
-  const items = container.querySelectorAll('.sugg-item');
-  if (!items.length) return null;
-  items.forEach(i => i.classList.remove('highlighted'));
-  suggHighlight += dir;
-  if (suggHighlight < 0) suggHighlight = items.length - 1;
-  if (suggHighlight >= items.length) suggHighlight = 0;
-  items[suggHighlight].classList.add('highlighted');
-  return items[suggHighlight];
-}
-
-function setupSmartSearch(inputEl, suggEl, onCommit) {
-  // Show trending on focus if empty
-  inputEl.addEventListener('focus', async () => {
-    if (inputEl.value.trim()) return;
-    if (!trendingCache.length) {
-      try { const r = await api.trending(); trendingCache = (r.data || []).slice(0,7); } catch(e) {}
-    }
-    if (trendingCache.length) openSuggestions(suggEl, trendingCache, '🔥 Trending');
-  });
-
-  inputEl.addEventListener('input', () => {
-    const q = inputEl.value.trim();
-    clearTimeout(suggDebounce);
-    if (!q) {
-      openSuggestions(suggEl, trendingCache, '🔥 Trending');
-      return;
-    }
-    // Instant filter from cache first
-    if (trendingCache.length) {
-      const instant = trendingCache.filter(i =>
-        (i.title||i.name||'').toLowerCase().includes(q.toLowerCase())
-      );
-      if (instant.length) openSuggestions(suggEl, instant);
-    }
-    // Then fetch from API with debounce
-    suggDebounce = setTimeout(async () => {
-      if (inputEl.value.trim().length < 2) return;
-      try {
-        const res = await api.search(inputEl.value.trim());
-        const items = (res.data || []).slice(0, 8);
-        if (items.length) openSuggestions(suggEl, items);
-      } catch(e) {}
-    }, 300);
-  });
-
-  inputEl.addEventListener('keydown', e => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); moveSuggHighlight(suggEl, 1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); moveSuggHighlight(suggEl, -1); }
-    else if (e.key === 'Enter') {
-      const hi = suggEl.querySelector('.sugg-item.highlighted');
-      if (hi) {
-        e.preventDefault();
-        closeSuggestions(suggEl);
-        openDetail({ id: hi.dataset.id, type: hi.dataset.type });
-        inputEl.value = '';
-      } else {
-        closeSuggestions(suggEl);
-        onCommit(inputEl.value.trim());
-      }
-    } else if (e.key === 'Escape') {
-      closeSuggestions(suggEl);
-    }
-  });
-
-  document.addEventListener('click', e => {
-    if (!inputEl.contains(e.target) && !suggEl.contains(e.target)) closeSuggestions(suggEl);
   });
 }
 
@@ -1146,7 +951,6 @@ async function loadHome() {
     wrap.innerHTML = errMsg('Could not load content. Check your API connection.');
     return;
   }
-  trendingCache = trendingData.data;
   document.getElementById('hero').style.display = '';
   renderHero(trendingData.data);
 
@@ -1195,22 +999,16 @@ async function loadSearch(q) {
   }
   buildGenrePills();
   const input = document.getElementById('search-input');
-  const suggEl = document.getElementById('search-suggestions');
   input.value = q;
-
-  // Setup smart search on main search page
-  input.oninput = null;
-  setupSmartSearch(input, suggEl, v => {
-    selectedGenre = null; buildGenrePills();
-    if (v.length > 1) runSearch(v); else loadSearchDefault();
-  });
-
-  if (q) {
-    runSearch(q);
-  } else {
-    loadSearchDefault();
-    input.focus();
-  }
+  if (q) runSearch(q); else loadSearchDefault();
+  input.oninput = () => {
+    clearTimeout(searchDebounce);
+    const v = input.value.trim();
+    searchDebounce = setTimeout(() => {
+      selectedGenre = null; buildGenrePills();
+      if (v.length > 1) runSearch(v); else loadSearchDefault();
+    }, 380);
+  };
 }
 
 function buildGenrePills() {
@@ -1324,10 +1122,12 @@ async function openDetail(item) {
   watchBtn.onclick = () => { if (isMovie) loadMoviePlayer(id); else showTvSections(media); };
   actionsEl.appendChild(watchBtn);
 
+  // Downloads — fetch and render on same page
   if (isMovie) {
     api.movieDownload(id).then(dlRes => renderDownloadPanel(dlRes, title)).catch(() => {});
   }
 
+  // Cast
   const castArr = (castData && castData.data) || [];
   if (castArr.length) {
     document.getElementById('cast-scroll').innerHTML = castArr.slice(0, 16).map(m =>
@@ -1344,6 +1144,7 @@ async function openDetail(item) {
     document.getElementById('cast-section').classList.remove('hidden');
   }
 
+  // Similar
   const simArr = (similarData && similarData.data) || [];
   if (simArr.length) {
     const simScroll = document.getElementById('similar-scroll');
@@ -1357,7 +1158,7 @@ async function openDetail(item) {
 }
 
 /* ═══════════════════════════════════════════════
-   DOWNLOAD PANEL
+   DOWNLOAD PANEL — SAME PAGE, NO NEW TAB
 ═══════════════════════════════════════════════ */
 function renderDownloadPanel(dlRes, mediaTitle) {
   const links = (dlRes && dlRes.data && dlRes.data.download_links) || [];
@@ -1367,10 +1168,9 @@ function renderDownloadPanel(dlRes, mediaTitle) {
   wrap.innerHTML = '';
 
   links.forEach((link, idx) => {
-    const quality  = link.quality || link.resolution || link.label || ('Link ' + (idx+1));
-    const size     = link.size || link.filesize || '';
-    const fileName = (mediaTitle||'download').replace(/[^a-zA-Z0-9 _-]/g,'').replace(/\s+/g,'_')
-                   + '_' + quality.replace(/[^a-zA-Z0-9]/g,'') + '.mp4';
+    const quality = link.quality || link.resolution || link.label || ('Link ' + (idx+1));
+    const size = link.size || link.filesize || '';
+    const fileName = (mediaTitle||'download').replace(/[^a-zA-Z0-9 _-]/g,'').replace(/\s+/g,'_') + '_' + quality.replace(/[^a-zA-Z0-9]/g,'') + '.mp4';
 
     const card = document.createElement('div');
     card.className = 'dl-card';
@@ -1396,27 +1196,30 @@ function renderDownloadPanel(dlRes, mediaTitle) {
 }
 
 async function doDownload(url, fileName, idx) {
-  const btn  = document.getElementById('bdl' + idx);
+  const btn = document.getElementById('bdl' + idx);
   const prog = document.getElementById('dp' + idx);
-  const bar  = document.getElementById('db' + idx);
-  const lbl  = document.getElementById('dl' + idx);
+  const bar = document.getElementById('db' + idx);
+  const lbl = document.getElementById('dl' + idx);
 
   btn.disabled = true;
   btn.innerHTML = '<span class="dl-spin"></span> &nbsp;Connecting…';
   prog.classList.remove('hidden');
   bar.style.width = '0%';
-  lbl.textContent = 'Connecting…';
+  lbl.textContent = 'Connecting to server…';
 
-  // Try fetch-with-progress first (same origin / CORS-enabled URLs)
   try {
-    const res = await fetch(url, { mode: 'cors' });
+    // Primary: streaming fetch with progress
+    const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const total   = parseInt(res.headers.get('Content-Length') || '0');
-    const reader  = res.body.getReader();
-    const chunks  = [];
-    let received  = 0;
+
+    const total = parseInt(res.headers.get('Content-Length') || '0');
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+
     btn.innerHTML = '⬇ &nbsp;Downloading…';
     lbl.textContent = 'Downloading…';
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -1431,34 +1234,52 @@ async function doDownload(url, fileName, idx) {
         lbl.textContent = 'Downloaded ' + fmtBytes(received) + '…';
       }
     }
-    bar.style.width = '100%';
-    lbl.textContent = 'Saving…';
-    const blob = new Blob(chunks);
-    triggerAnchorDownload(URL.createObjectURL(blob), fileName);
-    setTimeout(() => URL.revokeObjectURL(blob), 60000);
-    prog.innerHTML = '<div class="dl-done">✅ Saved to Downloads!</div>';
-    btn.innerHTML  = '✓ &nbsp;Saved';
-    btn.style.cssText = 'background:linear-gradient(135deg,#065f46,#10b981);box-shadow:0 3px 12px rgba(16,185,129,.35)';
-  } catch(fetchErr) {
-    // Fallback: plain anchor download (stays on page — no _blank)
-    console.warn('Stream download failed, using anchor:', fetchErr.message);
-    lbl.textContent = 'Starting via browser…';
-    bar.style.width = '100%';
-    triggerAnchorDownload(url, fileName);
-    setTimeout(() => {
-      prog.innerHTML = '<div class="dl-done">✅ Download started — check your Downloads!</div>';
-      btn.innerHTML  = '✓ &nbsp;Started';
-      btn.style.cssText = 'background:linear-gradient(135deg,#065f46,#10b981)';
-      btn.disabled = false;
-    }, 1500);
-  }
-}
 
-function triggerAnchorDownload(url, fileName) {
-  const a = document.createElement('a');
-  a.href = url; a.download = fileName;
-  // NO target="_blank" — stays on page
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    bar.style.width = '100%';
+    lbl.textContent = 'Saving to your files…';
+
+    const blob = new Blob(chunks);
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+
+    prog.innerHTML = '<div class="dl-done">✅ Saved to your Downloads folder!</div>';
+    btn.innerHTML = '✓ &nbsp;Saved';
+    btn.style.background = 'linear-gradient(135deg, #065f46, #10b981)';
+    btn.style.boxShadow = '0 3px 12px rgba(16,185,129,0.35)';
+
+  } catch(fetchErr) {
+    // Fallback: anchor download — stays on page (no target="_blank")
+    console.warn('Streaming download failed, using anchor fallback:', fetchErr.message);
+    lbl.textContent = 'Starting download via browser…';
+    bar.style.width = '100%';
+
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      // No target="_blank" — stays on same page
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      setTimeout(() => {
+        prog.innerHTML = '<div class="dl-done">✅ Download started — check your downloads!</div>';
+        btn.innerHTML = '✓ &nbsp;Started';
+        btn.style.background = 'linear-gradient(135deg, #065f46, #10b981)';
+        btn.disabled = false;
+      }, 1500);
+    } catch(e2) {
+      prog.innerHTML = `<div class="dl-err">⚠ Download failed: ${esc(e2.message)}</div>`;
+      btn.innerHTML = '⬇ &nbsp;Retry';
+      btn.disabled = false;
+    }
+  }
 }
 
 function fmtBytes(b) {
@@ -1482,10 +1303,7 @@ async function loadMoviePlayer(id) {
     const res = await api.moviePlayer(id);
     playerData = res.data;
     const players = (playerData && playerData.embed_players) || [];
-    if (!players.length) {
-      document.getElementById('player-frame-wrap').innerHTML = '<p class="empty-msg">No players available.</p>';
-      return;
-    }
+    if (!players.length) { document.getElementById('player-frame-wrap').innerHTML = '<p class="empty-msg">No players available.</p>'; return; }
     activeServerIndex = 0;
     renderPlayerFrame(players);
   } catch(e) {
@@ -1508,16 +1326,15 @@ async function loadTvPlayer(tvId, season, episode) {
     const res = await api.tvPlayer(tvId, season, episode);
     playerData = res.data;
     const players = (playerData && playerData.embed_players) || [];
+
     if (playerData && (playerData.episode_title || playerData.episode_overview)) {
       document.getElementById('ep-title').innerHTML =
         `S${season} · E${episode}${playerData.episode_title ? ' — ' + esc(playerData.episode_title) : ''}`;
       document.getElementById('ep-overview').textContent = playerData.episode_overview || '';
       document.getElementById('ep-info-bar').classList.remove('hidden');
     }
-    if (!players.length) {
-      document.getElementById('player-frame-wrap').innerHTML = '<p class="empty-msg">No players available.</p>';
-      return;
-    }
+
+    if (!players.length) { document.getElementById('player-frame-wrap').innerHTML = '<p class="empty-msg">No players available.</p>'; return; }
     activeServerIndex = 0;
     renderPlayerFrame(players);
   } catch(e) {
@@ -1525,16 +1342,11 @@ async function loadTvPlayer(tvId, season, episode) {
   }
 }
 
-/* ═══════════════════════════════════════════════
-   RENDER PLAYER (server buttons + iframe)
-═══════════════════════════════════════════════ */
 function renderPlayerFrame(players) {
   const serversEl = document.getElementById('player-servers');
-  serversEl.innerHTML = players.map((p, i) => {
-    const label = friendlyProvider(p.provider || p.name || p.server || '');
-    return `<button class="server-btn ${i===activeServerIndex?'active':''}" data-i="${i}">${esc(label)}</button>`;
-  }).join('');
-
+  serversEl.innerHTML = players.map((p, i) =>
+    `<button class="server-btn ${i===activeServerIndex?'active':''}" data-i="${i}">${esc(p.provider)}</button>`
+  ).join('');
   serversEl.querySelectorAll('.server-btn').forEach(btn => {
     btn.onclick = () => {
       activeServerIndex = +btn.dataset.i;
@@ -1542,29 +1354,23 @@ function renderPlayerFrame(players) {
       setIframe(players[activeServerIndex]);
     };
   });
-
   const wrap = document.getElementById('player-frame-wrap');
-  wrap.innerHTML = '<iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups-to-escape-sandbox" style="width:100%;height:100%;border:none;display:block;"></iframe><div id="player-shield"></div>';
-
+  wrap.innerHTML = '<iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen" style="width:100%;height:100%;border:none;display:block;"></iframe><div id="player-shield"></div>';
+  // Shield logic: on click, briefly pass control to iframe (so play/pause works),
+  // then re-enable shield to block any subsequent ad clicks
   const shield = document.getElementById('player-shield');
   shield.addEventListener('click', () => {
     shield.classList.add('pass-click');
-    setTimeout(() => shield.classList.remove('pass-click'), 700);
+    setTimeout(() => shield.classList.remove('pass-click'), 600);
   });
-
   setIframe(players[activeServerIndex]);
 }
 
 function setIframe(player) {
   const iframe = document.getElementById('player-iframe');
-  if (!iframe) return;
-  // Sanitize URL — reject obvious non-stream URLs
-  const url = player.embed_url || player.url || player.src || '';
-  if (!url || url.includes('javascript:')) return;
-  iframe.src = url;
-  const label = friendlyProvider(player.provider || player.name || player.server || '');
+  if (iframe) iframe.src = player.embed_url;
   document.getElementById('player-note').textContent =
-    'Server: ' + label + (player.quality ? ' · ' + player.quality : '') + (player.note ? ' · ' + player.note : '');
+    'Server: ' + player.provider + (player.quality ? ' · ' + player.quality : '') + (player.note ? ' · ' + player.note : '');
 }
 
 /* ═══════════════════════════════════════════════
@@ -1573,6 +1379,7 @@ function setIframe(player) {
 function showTvSections(media) {
   const section = document.getElementById('tv-seasons-section');
   section.classList.remove('hidden');
+
   const seasons = (media.seasons || []).filter(s => s.season_number > 0);
   const cardsEl = document.getElementById('season-cards');
 
@@ -1593,7 +1400,9 @@ function showTvSections(media) {
     const total = media.number_of_seasons || 1;
     cardsEl.innerHTML = Array.from({length:total},(_,i)=>i+1).map(n =>
       `<div class="season-card ${n===selectedSeason?'active':''}" data-s="${n}">
-        <div style="padding:8px"><div class="season-card-name">Season ${n}</div></div>
+        <div style="padding:8px">
+          <div class="season-card-name">Season ${n}</div>
+        </div>
       </div>`
     ).join('');
   }
@@ -1626,6 +1435,7 @@ async function loadEpisodes(tvId, season) {
 function renderEpisodeList(tvId, episodes) {
   const listEl = document.getElementById('episode-list');
   if (!episodes.length) { listEl.innerHTML = '<p class="empty-msg">No episodes found.</p>'; return; }
+
   listEl.innerHTML = episodes.map(ep => {
     const isPlaying = selectedEpisode === ep.episode_number;
     return `<div class="ep-item ${isPlaying?'playing':''}" data-ep="${ep.episode_number}">
@@ -1663,40 +1473,29 @@ function renderEpisodeList(tvId, episodes) {
 ═══════════════════════════════════════════════ */
 document.getElementById('nav-logo').onclick = () => loadHome();
 
-const navSearchBtn   = document.getElementById('nav-search-btn');
-const navSearchForm  = document.getElementById('nav-search-form');
-const navSearchInput = document.getElementById('nav-search-input');
-const navSearchClose = document.getElementById('nav-search-close');
-const navSuggEl      = document.getElementById('nav-suggestions');
-
-navSearchBtn.onclick = () => {
-  navSearchForm.classList.remove('hidden');
-  navSearchBtn.classList.add('hidden');
-  navSearchInput.focus();
-  // Setup smart suggestions on nav input (first open)
-  if (!navSearchInput._smartSetup) {
-    navSearchInput._smartSetup = true;
-    setupSmartSearch(navSearchInput, navSuggEl, q => {
-      closeNavSearch();
-      if (q) loadSearch(q);
-    });
-  }
+document.getElementById('nav-search-btn').onclick = () => {
+  document.getElementById('nav-search-form').classList.remove('hidden');
+  document.getElementById('nav-search-btn').classList.add('hidden');
+  document.getElementById('nav-search-input').focus();
 };
 
-function closeNavSearch() {
-  navSearchForm.classList.add('hidden');
-  navSearchBtn.classList.remove('hidden');
-  navSearchInput.value = '';
-  closeSuggestions(navSuggEl);
+document.getElementById('nav-search-close').onclick = () => {
+  document.getElementById('nav-search-form').classList.add('hidden');
+  document.getElementById('nav-search-btn').classList.remove('hidden');
+  document.getElementById('nav-search-input').value = '';
+};
+
+function triggerNavSearch() {
+  const q = document.getElementById('nav-search-input').value.trim();
+  if (!q) return;
+  document.getElementById('nav-search-form').classList.add('hidden');
+  document.getElementById('nav-search-btn').classList.remove('hidden');
+  document.getElementById('nav-search-input').value = '';
+  loadSearch(q);
 }
 
-navSearchClose.onclick = closeNavSearch;
-document.getElementById('nav-search-go').onclick = () => {
-  const q = navSearchInput.value.trim();
-  closeNavSearch();
-  if (q) loadSearch(q);
-};
-navSearchInput.onkeydown = e => { if (e.key === 'Enter') { const q = navSearchInput.value.trim(); closeNavSearch(); if (q) loadSearch(q); } };
+document.getElementById('nav-search-go').onclick = triggerNavSearch;
+document.getElementById('nav-search-input').onkeydown = e => { if (e.key === 'Enter') triggerNavSearch(); };
 document.getElementById('btn-back').onclick = () => loadHome();
 
 /* INIT */
