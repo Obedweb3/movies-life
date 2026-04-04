@@ -650,12 +650,16 @@
       Element.prototype.insertBefore=function(n,r){if(isAdIframe(n))return n;return _ib.call(this,n,r);};
       Element.prototype.prepend=function(){for(var i=0;i<arguments.length;i++){if(isAdIframe(arguments[i]))return;} return _pr.apply(this,arguments);};
 
-      /* block ad scripts */
-      var _acNode=Node.prototype.appendChild;
-      Node.prototype.appendChild=function(n){
-        if(n&&n.tagName==='SCRIPT'&&isAd(n.src||''))return n;
-        return _acNode.call(this,n);
-      };
+      /* block ad scripts injected into document head */
+      var _headAppend = document.head ? document.head.appendChild.bind(document.head) : null;
+      if (_headAppend) {
+        document.head.appendChild = function(n) {
+          if (n && n.tagName === 'SCRIPT' && isAd(n.src || '')) {
+            console.log('[AB] Blocked ad script:', n.src); return n;
+          }
+          return _headAppend(n);
+        };
+      }
 
       /* overlay removal */
       var KNOWN=new Set(['navbar','hero','hero-bg','hero-content','rows-wrap','home-page',
@@ -684,17 +688,12 @@
         }).observe(document.body,{childList:true,subtree:true});
       });
 
-      /* block location hijack */
-      try{
-        var _loc=window.location;
-        Object.defineProperty(window,'location',{
-          get:function(){return _loc;},
-          set:function(v){if(userClickedMain){_loc.href=v;}else{console.log('[AB] Blocked location hijack:',v);}},
-          configurable:true
-        });
-      }catch(e){}
+      /* NOTE: We intentionally do NOT override window.location setter.
+         The browser already enforces cross-origin iframe isolation.
+         Overriding location causes issues with embed players that need
+         to set location internally for their own navigation. */
 
-      /* block history abuse */
+      /* block history abuse only for known ad domains */
       var _ps=history.pushState.bind(history),_rs=history.replaceState.bind(history);
       history.pushState=function(s,t,u){if(u&&isAd(String(u)))return;return _ps(s,t,u);};
       history.replaceState=function(s,t,u){if(u&&isAd(String(u)))return;return _rs(s,t,u);};
@@ -792,9 +791,7 @@
         <div id="player-servers"></div>
       </div>
       <div id="player-frame-wrap">
-        <iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write" style="width:100%;height:100%;border:none;display:block;"></iframe>
-        <div id="player-loading" class="hidden"><div class="player-load-msg"><div class="spinner" style="width:22px;height:22px;border-width:2px;"></div> Loading stream…</div></div>
-        <div id="player-shield"></div>
+        <!-- iframe injected dynamically by setIframe() -->
       </div>
       <p id="player-note"></p>
     </div>
@@ -1611,37 +1608,6 @@ function renderPlayerFrame(players) {
     };
   });
 
-  const wrap = document.getElementById('player-frame-wrap');
-  // NO sandbox attr — it breaks HLS players, token auth, postMessage APIs inside embeds
-  // NO referrerpolicy no-referrer — many embeds validate the Referer header
-  // Ad protection: shield layer + window-level listeners in the ad blocker above
-  wrap.innerHTML = `<iframe id="player-iframe"
-    allowfullscreen
-    allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write"
-    style="width:100%;height:100%;border:none;display:block;"
-  ></iframe>
-  <div id="player-loading" class="hidden">
-    <div class="player-load-msg"><div class="spinner" style="width:22px;height:22px;border-width:2px;margin:0;"></div>&nbsp; Loading stream…</div>
-  </div>
-  <div id="player-shield"></div>`;
-
-  const shield = document.getElementById('player-shield');
-  const loading = document.getElementById('player-loading');
-  let shieldTimer = null;
-
-  shield.addEventListener('click', () => {
-    // Pass click through to iframe for 700ms (play/pause/seek)
-    shield.classList.add('pass-click');
-    clearTimeout(shieldTimer);
-    shieldTimer = setTimeout(() => shield.classList.remove('pass-click'), 700);
-  });
-
-  shield.addEventListener('dblclick', () => {
-    // Double-click → fullscreen request — pass through longer
-    shield.classList.add('pass-click');
-    clearTimeout(shieldTimer);
-    shieldTimer = setTimeout(() => shield.classList.remove('pass-click'), 1500);
-  });
 
   setIframe(players[activeServerIndex]);
 }
@@ -1673,39 +1639,59 @@ function pickPlayerUrl(player) {
 }
 
 function setIframe(player) {
-  // Log full player object so we can see exactly what the API returns
-  console.log('[Player] Server object:', JSON.stringify(player, null, 2));
+  const url = pickPlayerUrl(player);
+  console.log('[Player] Loading:', player.name || player.provider, '|', url);
+
+  const wrap = document.getElementById('player-frame-wrap');
+  if (!wrap) return;
+
+  if (!url) {
+    wrap.innerHTML = '<p class="empty-msg" style="padding:40px">⚠ No stream URL for this server. Try another.</p>';
+    return;
+  }
+
+  // Completely replace the iframe element — cleanest way to load a new URL
+  // without any race conditions or stale src issues
+  wrap.innerHTML = `
+    <iframe
+      id="player-iframe"
+      src="${url}"
+      allowfullscreen
+      allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write"
+      style="width:100%;height:100%;border:none;display:block;"
+    ></iframe>
+    <div id="player-loading">
+      <div class="player-load-msg">
+        <div class="spinner" style="width:22px;height:22px;border-width:2px;margin:0;"></div>
+        &nbsp; Loading stream…
+      </div>
+    </div>
+    <div id="player-shield"></div>`;
 
   const iframe  = document.getElementById('player-iframe');
   const loading = document.getElementById('player-loading');
   const shield  = document.getElementById('player-shield');
-  if (!iframe) return;
 
-  const url = pickPlayerUrl(player);
-  console.log('[Player] Using URL:', url);
+  // Hide loading once iframe fires load event
+  iframe.addEventListener('load', function onLoad() {
+    iframe.removeEventListener('load', onLoad);
+    if (loading) loading.classList.add('hidden');
+  });
 
-  if (!url) {
-    const wrap = document.getElementById('player-frame-wrap');
-    if (wrap) wrap.innerHTML = '<p class="empty-msg" style="padding:40px">⚠ No stream URL found for this server.<br><small style="opacity:.6">Open browser console to see API response.</small></p>';
-    return;
-  }
-
-  // Show loading indicator
-  if (loading) loading.classList.remove('hidden');
-  if (shield)  shield.classList.remove('pass-click');
-
-  // Reset iframe to blank first — forces clean reload when switching servers
-  iframe.src = 'about:blank';
-  setTimeout(() => {
-    const fr = document.getElementById('player-iframe');
-    if (!fr) return;
-    fr.onload = () => { if (loading) loading.classList.add('hidden'); fr.onload = null; };
-    fr.src = url;
-  }, 80);
+  // Shield: pass click through briefly so play/pause works
+  let shieldTimer = null;
+  shield.addEventListener('click', () => {
+    shield.classList.add('pass-click');
+    clearTimeout(shieldTimer);
+    shieldTimer = setTimeout(() => shield.classList.remove('pass-click'), 700);
+  });
+  shield.addEventListener('dblclick', () => {
+    shield.classList.add('pass-click');
+    clearTimeout(shieldTimer);
+    shieldTimer = setTimeout(() => shield.classList.remove('pass-click'), 1500);
+  });
 
   const label = friendlyProvider(player.provider || player.name || player.server || '');
-  // Don't show the raw API note (it leaks internal implementation details)
-  // Just show server + quality
   document.getElementById('player-note').textContent =
     'Server: ' + label + (player.quality ? ' · ' + player.quality : '');
 }
