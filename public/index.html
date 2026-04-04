@@ -853,7 +853,9 @@ const API_DIRECT = 'https://movie-api.obedtech.top/api';
 const cache = new Map();
 
 async function apiFetch(path) {
-  if (cache.has(path)) return cache.get(path);
+  // Don't cache player/stream endpoints — URLs expire and may rotate
+  const noCache = path.includes('/player') || path.includes('/download');
+  if (!noCache && cache.has(path)) return cache.get(path);
   const bases = [API_PROXY, API_DIRECT];
   let lastErr;
   for (const base of bases) {
@@ -864,7 +866,7 @@ async function apiFetch(path) {
       clearTimeout(t);
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
-      cache.set(path, json);
+      if (!noCache) cache.set(path, json);
       return json;
     } catch(e) { console.warn('[api]', base + path, e.message); lastErr = e; }
   }
@@ -1619,15 +1621,47 @@ function renderPlayerFrame(players) {
   setIframe(players[activeServerIndex]);
 }
 
+function pickPlayerUrl(player) {
+  // Priority: watch_uri > watch_url > stream_url > direct_url > embed_url > url > src
+  // The API note says "use watch_uri for ad-free experience" — so watch_uri is always first
+  const candidates = [
+    player.watch_uri,
+    player.watch_url,
+    player.stream_url,
+    player.stream_uri,
+    player.direct_url,
+    player.direct_uri,
+    player.source_url,
+    player.embed_url,
+    player.url,
+    player.src,
+    player.link,
+    player.iframe,
+    player.iframe_url,
+  ];
+  for (const u of candidates) {
+    if (u && typeof u === 'string' && u.trim() !== '' && !u.startsWith('javascript:')) {
+      return u.trim();
+    }
+  }
+  return '';
+}
+
 function setIframe(player) {
+  // Log full player object so we can see exactly what the API returns
+  console.log('[Player] Server object:', JSON.stringify(player, null, 2));
+
   const iframe  = document.getElementById('player-iframe');
   const loading = document.getElementById('player-loading');
   const shield  = document.getElementById('player-shield');
   if (!iframe) return;
 
-  const url = player.embed_url || player.url || player.src || '';
-  if (!url || url.trim() === '' || url.startsWith('javascript:')) {
-    iframe.closest('#player-frame-wrap').innerHTML = '<p class="empty-msg">⚠ No valid stream URL for this server. Try another.</p>';
+  const url = pickPlayerUrl(player);
+  console.log('[Player] Using URL:', url);
+
+  if (!url) {
+    const wrap = document.getElementById('player-frame-wrap');
+    if (wrap) wrap.innerHTML = '<p class="empty-msg" style="padding:40px">⚠ No stream URL found for this server.<br><small style="opacity:.6">Open browser console to see API response.</small></p>';
     return;
   }
 
@@ -1635,7 +1669,7 @@ function setIframe(player) {
   if (loading) loading.classList.remove('hidden');
   if (shield)  shield.classList.remove('pass-click');
 
-  // Reset to blank first so changing servers always triggers a fresh load
+  // Reset iframe to blank first — forces clean reload when switching servers
   iframe.src = 'about:blank';
   setTimeout(() => {
     const fr = document.getElementById('player-iframe');
@@ -1645,10 +1679,10 @@ function setIframe(player) {
   }, 80);
 
   const label = friendlyProvider(player.provider || player.name || player.server || '');
+  // Don't show the raw API note (it leaks internal implementation details)
+  // Just show server + quality
   document.getElementById('player-note').textContent =
-    'Server: ' + label +
-    (player.quality ? ' · ' + player.quality : '') +
-    (player.note    ? ' · ' + player.note    : '');
+    'Server: ' + label + (player.quality ? ' · ' + player.quality : '');
 }
 
 /* ═══════════════════════════════════════════════
