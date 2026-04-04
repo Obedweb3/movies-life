@@ -357,13 +357,28 @@
     #player-iframe { width: 100%; height: 100%; border: none; display: block; }
     #player-note { font-size: 11px; color: var(--fg3); margin-top: 8px; letter-spacing: 0.3px; }
 
-    /* Click-shield: transparent layer over iframe that intercepts ad clicks */
+    /* Click-shield: transparent overlay over iframe — intercepts ad mis-clicks
+       while passing real play/pause through via .pass-click toggle */
     #player-shield {
       position: absolute; inset: 0; z-index: 10;
       background: transparent; cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
-    /* Hide shield briefly after a real click so play/pause works */
     #player-shield.pass-click { pointer-events: none; }
+    /* Loading overlay shown while iframe src changes */
+    #player-loading {
+      position: absolute; inset: 0; z-index: 9;
+      background: rgba(8,8,16,0.85);
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 14px;
+    }
+    #player-loading.hidden { display: none; }
+    .player-load-msg {
+      font-family: var(--font-head); font-size: 13px; font-weight: 700;
+      letter-spacing: 2px; text-transform: uppercase; color: var(--fg2);
+      display: flex; align-items: center; gap: 10px;
+    }
 
     /* DOWNLOAD PANEL */
     #download-panel { margin: 18px 0; }
@@ -574,6 +589,11 @@
       document.addEventListener('mousedown',setUC,true);
       document.addEventListener('keydown',setUC,true);
       document.addEventListener('pointerdown',setUC,true);
+      // When shield passes click through, treat as user interaction
+      // so window.open inside the embed is allowed for that window
+      document.addEventListener('click', function(e){
+        if(e.target && e.target.id==='player-shield') setUC();
+      }, true);
 
       /* block window.open */
       var _open=window.open.bind(window);
@@ -772,7 +792,8 @@
         <div id="player-servers"></div>
       </div>
       <div id="player-frame-wrap">
-        <iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen"></iframe>
+        <iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write" style="width:100%;height:100%;border:none;display:block;"></iframe>
+        <div id="player-loading" class="hidden"><div class="player-load-msg"><div class="spinner" style="width:22px;height:22px;border-width:2px;"></div> Loading stream…</div></div>
         <div id="player-shield"></div>
       </div>
       <p id="player-note"></p>
@@ -1528,7 +1549,27 @@ async function loadTvPlayer(tvId, season, episode) {
 /* ═══════════════════════════════════════════════
    RENDER PLAYER (server buttons + iframe)
 ═══════════════════════════════════════════════ */
+// Block embed→parent navigation attempts via postMessage
+(function(){
+  var _pmHandler = null;
+  window._setupPlayerMsgBlock = function() {
+    if (_pmHandler) window.removeEventListener('message', _pmHandler);
+    _pmHandler = function(e) {
+      try {
+        var d = (typeof e.data === 'string') ? JSON.parse(e.data) : e.data;
+        if (d && (d.action === 'navigate' || d.type === 'redirect')) {
+          var url = d.url || d.href || '';
+          if (url && !url.includes(location.hostname)) return;
+        }
+      } catch(err) {}
+    };
+    window.addEventListener('message', _pmHandler, false);
+  };
+})();
+
 function renderPlayerFrame(players) {
+  window._setupPlayerMsgBlock && window._setupPlayerMsgBlock();
+
   const serversEl = document.getElementById('player-servers');
   serversEl.innerHTML = players.map((p, i) => {
     const label = friendlyProvider(p.provider || p.name || p.server || '');
@@ -1544,27 +1585,70 @@ function renderPlayerFrame(players) {
   });
 
   const wrap = document.getElementById('player-frame-wrap');
-  wrap.innerHTML = '<iframe id="player-iframe" allowfullscreen allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups-to-escape-sandbox" style="width:100%;height:100%;border:none;display:block;"></iframe><div id="player-shield"></div>';
+  // NO sandbox attr — it breaks HLS players, token auth, postMessage APIs inside embeds
+  // NO referrerpolicy no-referrer — many embeds validate the Referer header
+  // Ad protection: shield layer + window-level listeners in the ad blocker above
+  wrap.innerHTML = `<iframe id="player-iframe"
+    allowfullscreen
+    allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write"
+    style="width:100%;height:100%;border:none;display:block;"
+  ></iframe>
+  <div id="player-loading" class="hidden">
+    <div class="player-load-msg"><div class="spinner" style="width:22px;height:22px;border-width:2px;margin:0;"></div>&nbsp; Loading stream…</div>
+  </div>
+  <div id="player-shield"></div>`;
 
   const shield = document.getElementById('player-shield');
+  const loading = document.getElementById('player-loading');
+  let shieldTimer = null;
+
   shield.addEventListener('click', () => {
+    // Pass click through to iframe for 700ms (play/pause/seek)
     shield.classList.add('pass-click');
-    setTimeout(() => shield.classList.remove('pass-click'), 700);
+    clearTimeout(shieldTimer);
+    shieldTimer = setTimeout(() => shield.classList.remove('pass-click'), 700);
+  });
+
+  shield.addEventListener('dblclick', () => {
+    // Double-click → fullscreen request — pass through longer
+    shield.classList.add('pass-click');
+    clearTimeout(shieldTimer);
+    shieldTimer = setTimeout(() => shield.classList.remove('pass-click'), 1500);
   });
 
   setIframe(players[activeServerIndex]);
 }
 
 function setIframe(player) {
-  const iframe = document.getElementById('player-iframe');
+  const iframe  = document.getElementById('player-iframe');
+  const loading = document.getElementById('player-loading');
+  const shield  = document.getElementById('player-shield');
   if (!iframe) return;
-  // Sanitize URL — reject obvious non-stream URLs
+
   const url = player.embed_url || player.url || player.src || '';
-  if (!url || url.includes('javascript:')) return;
-  iframe.src = url;
+  if (!url || url.trim() === '' || url.startsWith('javascript:')) {
+    iframe.closest('#player-frame-wrap').innerHTML = '<p class="empty-msg">⚠ No valid stream URL for this server. Try another.</p>';
+    return;
+  }
+
+  // Show loading indicator
+  if (loading) loading.classList.remove('hidden');
+  if (shield)  shield.classList.remove('pass-click');
+
+  // Reset to blank first so changing servers always triggers a fresh load
+  iframe.src = 'about:blank';
+  setTimeout(() => {
+    const fr = document.getElementById('player-iframe');
+    if (!fr) return;
+    fr.onload = () => { if (loading) loading.classList.add('hidden'); fr.onload = null; };
+    fr.src = url;
+  }, 80);
+
   const label = friendlyProvider(player.provider || player.name || player.server || '');
   document.getElementById('player-note').textContent =
-    'Server: ' + label + (player.quality ? ' · ' + player.quality : '') + (player.note ? ' · ' + player.note : '');
+    'Server: ' + label +
+    (player.quality ? ' · ' + player.quality : '') +
+    (player.note    ? ' · ' + player.note    : '');
 }
 
 /* ═══════════════════════════════════════════════
