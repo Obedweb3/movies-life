@@ -897,45 +897,35 @@ const api = {
 };
 
 /* ═══════════════════════════════════════════════
-   SERVER NAME MAP  (provider → display name)
+   DIRECT STREAM SOURCES
+   Built from TMDB ID — bypasses broken API player endpoint entirely.
+   These are publicly known embed providers with stable URL patterns.
 ═══════════════════════════════════════════════ */
-const SERVER_NAMES = {
-  'vidsrc.to'   : 'StreamHub HD',
-  'vidsrc.me'   : 'StreamHub HD',
-  'vidsrc'      : 'StreamHub HD',
-  'vidsrc.xyz'  : 'StreamHub HD',
-  'vidsrc.net'  : 'StreamHub HD',
-  '2embed'      : 'CineStream',
-  '2embed.cc'   : 'CineStream',
-  'superembed'  : 'NovaCine',
-  'super-embed' : 'NovaCine',
-  'multiembed'  : 'VaultPlay',
-  'multi-embed' : 'VaultPlay',
-  'embedsu'     : 'PrimeView',
-  'embed.su'    : 'PrimeView',
-  'autoembed'   : 'FluxStream',
-  'auto-embed'  : 'FluxStream',
-  'smashystream': 'TurboPlay',
-  'smashy'      : 'TurboPlay',
-  'moviesapi'   : 'RapidCine',
-  'moviesapi.club': 'RapidCine',
-  'frembed'     : 'FreeView',
-  'player.php'  : 'QuickStream',
-  'embedder'    : 'EmbedPro',
-  'streamtape'  : 'TapeStream',
-  'doodstream'  : 'DoodPlay',
-  'filemoon'    : 'MoonStream',
-  'upstream'    : 'UpStream',
-};
+const MOVIE_SOURCES = [
+  { name: 'StreamHub HD',   url: id => `https://vidsrc.to/embed/movie/${id}` },
+  { name: 'CineStream',     url: id => `https://www.2embed.cc/embed/${id}` },
+  { name: 'NovaCine',       url: id => `https://multiembed.mov/?video_id=${id}&tmdb=1` },
+  { name: 'PrimeView',      url: id => `https://embed.su/embed/movie/${id}` },
+  { name: 'FluxStream',     url: id => `https://autoembed.co/movie/tmdb-${id}` },
+  { name: 'TurboPlay',      url: id => `https://player.smashy.stream/movie/${id}` },
+  { name: 'RapidCine',      url: id => `https://moviesapi.club/movie/${id}` },
+  { name: 'VaultPlay',      url: id => `https://vidsrc.me/embed/movie?tmdb=${id}` },
+];
+
+const TV_SOURCES = [
+  { name: 'StreamHub HD',   url: (id,s,e) => `https://vidsrc.to/embed/tv/${id}/${s}/${e}` },
+  { name: 'CineStream',     url: (id,s,e) => `https://www.2embed.cc/embedtv/${id}&s=${s}&e=${e}` },
+  { name: 'NovaCine',       url: (id,s,e) => `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${s}&e=${e}` },
+  { name: 'PrimeView',      url: (id,s,e) => `https://embed.su/embed/tv/${id}/${s}/${e}` },
+  { name: 'FluxStream',     url: (id,s,e) => `https://autoembed.co/tv/tmdb-${id}-${s}-${e}` },
+  { name: 'TurboPlay',      url: (id,s,e) => `https://player.smashy.stream/tv/${id}?s=${s}&e=${e}` },
+  { name: 'RapidCine',      url: (id,s,e) => `https://moviesapi.club/tv/${id}-${s}-${e}` },
+  { name: 'VaultPlay',      url: (id,s,e) => `https://vidsrc.me/embed/tv?tmdb=${id}&season=${s}&episode=${e}` },
+];
 
 function friendlyProvider(raw) {
   if (!raw) return 'Server';
-  const key = raw.toLowerCase().replace(/https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-  for (const [k, v] of Object.entries(SERVER_NAMES)) {
-    if (key.includes(k) || raw.toLowerCase().includes(k)) return v;
-  }
-  // Title-case fallback
-  return raw.replace(/[-_.]/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+  return raw; // names already set in MOVIE_SOURCES/TV_SOURCES
 }
 
 /* ═══════════════════════════════════════════════
@@ -1498,21 +1488,40 @@ async function loadMoviePlayer(id) {
   const section = document.getElementById('player-section');
   section.classList.remove('hidden');
   section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  document.getElementById('player-servers').innerHTML = '';
-  document.getElementById('player-frame-wrap').innerHTML = spinner();
 
+  // Build players directly from TMDB ID — no API call needed, no broken URLs
+  const players = MOVIE_SOURCES.map(s => ({
+    name:      s.name,
+    provider:  s.name,
+    embed_url: s.url(id),
+  }));
+
+  activeServerIndex = 0;
+  renderPlayerFrame(players);
+
+  // Also fetch API player data in background — if it has better URLs, merge them
   try {
     const res = await api.moviePlayer(id);
-    playerData = res.data;
-    const players = (playerData && playerData.embed_players) || [];
-    if (!players.length) {
-      document.getElementById('player-frame-wrap').innerHTML = '<p class="empty-msg">No players available.</p>';
-      return;
+    const apiPlayers = (res && res.data && res.data.embed_players) || [];
+    if (apiPlayers.length) {
+      // Prepend any API sources that have watch_uri (ad-free direct URL)
+      const extra = apiPlayers
+        .filter(p => p.watch_uri || p.watch_url || p.stream_url)
+        .map(p => ({
+          name:      friendlyProvider(p.provider || p.name || 'API Source'),
+          provider:  p.provider || '',
+          embed_url: p.watch_uri || p.watch_url || p.stream_url || p.embed_url || '',
+        }))
+        .filter(p => p.embed_url);
+      if (extra.length) {
+        const merged = [...extra, ...players];
+        activeServerIndex = 0;
+        renderPlayerFrame(merged);
+      }
     }
-    activeServerIndex = 0;
-    renderPlayerFrame(players);
   } catch(e) {
-    document.getElementById('player-frame-wrap').innerHTML = errMsg('Failed to load player: ' + e.message);
+    // API player failed — that's fine, we already loaded direct sources above
+    console.log('[Player] API player fetch failed (using direct sources):', e.message);
   }
 }
 
@@ -1523,28 +1532,44 @@ async function loadTvPlayer(tvId, season, episode) {
   const section = document.getElementById('player-section');
   section.classList.remove('hidden');
   section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  document.getElementById('player-servers').innerHTML = '';
-  document.getElementById('player-frame-wrap').innerHTML = spinner();
   document.getElementById('ep-info-bar').classList.add('hidden');
 
+  // Build players directly from TMDB ID + season + episode — no API call needed
+  const players = TV_SOURCES.map(s => ({
+    name:      s.name,
+    provider:  s.name,
+    embed_url: s.url(tvId, season, episode),
+  }));
+
+  activeServerIndex = 0;
+  renderPlayerFrame(players);
+
+  // Fetch episode info + API player data in background
   try {
     const res = await api.tvPlayer(tvId, season, episode);
-    playerData = res.data;
-    const players = (playerData && playerData.embed_players) || [];
+    playerData = res && res.data;
     if (playerData && (playerData.episode_title || playerData.episode_overview)) {
       document.getElementById('ep-title').innerHTML =
         `S${season} · E${episode}${playerData.episode_title ? ' — ' + esc(playerData.episode_title) : ''}`;
       document.getElementById('ep-overview').textContent = playerData.episode_overview || '';
       document.getElementById('ep-info-bar').classList.remove('hidden');
     }
-    if (!players.length) {
-      document.getElementById('player-frame-wrap').innerHTML = '<p class="empty-msg">No players available.</p>';
-      return;
+    // Merge in any API sources with direct stream URLs
+    const apiPlayers = (playerData && playerData.embed_players) || [];
+    const extra = apiPlayers
+      .filter(p => p.watch_uri || p.watch_url || p.stream_url)
+      .map(p => ({
+        name:      friendlyProvider(p.provider || p.name || 'API Source'),
+        provider:  p.provider || '',
+        embed_url: p.watch_uri || p.watch_url || p.stream_url || p.embed_url || '',
+      }))
+      .filter(p => p.embed_url);
+    if (extra.length) {
+      activeServerIndex = 0;
+      renderPlayerFrame([...extra, ...players]);
     }
-    activeServerIndex = 0;
-    renderPlayerFrame(players);
   } catch(e) {
-    document.getElementById('player-frame-wrap').innerHTML = errMsg('Failed to load player: ' + e.message);
+    console.log('[Player] API tv-player fetch failed (using direct sources):', e.message);
   }
 }
 
